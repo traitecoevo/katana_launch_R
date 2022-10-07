@@ -1,0 +1,137 @@
+
+# Establish grid
+
+Create grid of parameters you want to run
+
+```{r}
+library(tidyverse)
+
+dir.create("output/grid", T, T)
+
+grid <- 
+  expand_grid(
+    trait = "lma",
+    D = c(0.5,1,2,5,10,15,20,25,30,35,40),
+    B = c(0.5,0.75,0.95,0.99,1.01,1.1,1.25,1.51,1.75,2.0,2.25,2.5)
+    ) %>% mutate(
+      name = sprintf("%s_%s_%s", trait, D, B),
+      path = sprintf("output/grid/%s/%s", trait, name),
+      status = "none"
+    )
+
+grid %>% write_csv("output/grid/lma.csv")
+
+```
+
+
+
+# Run simulations
+
+## Single locally (interactive)
+
+```{r}
+# Load whatever files you need
+source("R/my_model.R")
+
+trait <- "lma"
+
+D <- 10
+B <- 1.5
+path <- "output/tmp"
+
+my_model(trait, D, B, path)
+```
+
+## Single locally (via terminal)
+
+```
+./launch/run.R lma 10 1.5
+```
+
+## Many locally (with mclappy)
+
+```{r}
+source("R/my_model.R")
+
+
+grid_list <- 
+  # load grid
+  read.csv("output/grid/lma.csv", stringsAsFactors = F) %>%
+  # filter to items you want to run 
+  filter(D < 10) %>% 
+  # then make into list
+  split(., .$name) %>% lapply(as.list)
+
+# execute jobs in parallel
+parallel::mclapply(grid_list, function(x) my_model(x$trait, x$D, x$B, x$path), mc.cores=6)
+
+```
+
+## Many locall (via terminal in background
+
+```{sh, eval=FALSE}
+# lma
+D=10
+for b in 0.75 0.98 1.05 1.2 1.5 2.0;
+ do
+   nohup  ./run.R lma $b $D0 output/lma-$b.txt 2>&1 &
+done
+```
+
+## Launch in katana, each as separate job 
+
+```{r}
+source("launch/pbs.R")
+
+# launch one job
+i <- 1
+launch_task_i_katana(grid_list[[i]])
+
+# launch many jobs
+lapply(grid_list, launch_task_i_katana)
+```
+
+# Checking status of HPC jobs
+
+Check status
+```{r}
+check_grid_status("output/grid/lma.csv")
+```
+
+
+# Assessing time use
+
+```{r}
+
+library(stringr)
+library(dplyr)
+
+pbs_path <- "results/pbs/rho_combinations"
+
+files <- dir(pbs_path, pattern = "output*", full.names=TRUE)
+
+read_file<- function(filename) {
+  f <- readLines(filename)
+  s <- f[grepl("Total)", f, fixed=TRUE)] %>% str_trim() %>% str_split(.," ") %>% unlist()
+  s[[1]][1]
+}
+
+times <- tibble(gsub("/Users/dfalster/Downloads/mortality_bci/results/pbs/rho_combinations/output_", "", files) %>% as.numeric(),
+               time =(lapply(files, read_file) %>% na_if("NULL") %>% unlist() %>% as.numeric()) / 60/60)
+
+data <- left_join(
+            remake::make("rho_tasks") %>% as_tibble(),
+            times, by = "jobid") %>%
+      dplyr::select(rho_combo, jobid, kfold, time) %>%
+      mutate(
+            rho_combo = factor(rho_combo, levels = c("none", "a", "b", "c","ab", "ac", "bc", "abc")),
+            kfold = as.character(kfold)
+            )
+
+
+ggplot(data, aes(rho_combo, time)) +
+  geom_boxplot(colour="grey") +
+  geom_point(aes(colour = kfold)) +
+  labs( x = "Model variant (rho combinations)", y = "time per job (hrs)")
+```
+
