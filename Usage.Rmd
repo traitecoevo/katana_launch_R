@@ -86,9 +86,9 @@ grid <-
     status = "none",
     path = sprintf("%s/%s", output_path, name),
     # Extra details needed on katana
-    wall='AAA',
-    email = "X@X", 
-    project_root= "YYY"  #e.g.   /home/z3239343/mystudy
+    wall='00:01',
+    email = "XX@unsw.edu.au", 
+    project_root= "/home/z2209XX/project" 
   )
 
 dir.create(output_path, F, T)
@@ -239,13 +239,11 @@ So the code first create the pbs files then submits them
 library(dplyr)
 source("R/my_model.R")
 
-library(parallel)
-
 grid_list <- 
   # load grid
   read_csv("output/grid.csv", show_col_types = FALSE) %>%
   # filter to items you want to run 
-  #filter(D < 10) %>% 
+  slice(1:20) %>% 
   # then make into list
   split(., .$name) %>% lapply(as.list)
 
@@ -253,10 +251,10 @@ source("launch/pbs.R")
 
 # launch one job
 i <- 1
-launch_task_i_katana(grid_list[[i]])
+launch_task_i_katana(grid_list[[i]], dry_run = F)
 
 # launch many jobs
-walk(grid_list, launch_task_i_katana)
+walk(grid_list, launch_task_i_katana, dry_run = F)
 ```
 
 ## Checking status of HPC jobs

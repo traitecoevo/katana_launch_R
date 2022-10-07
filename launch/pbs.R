@@ -1,9 +1,9 @@
 
-launch_task_i_katana <- function(par_set, sleep=0, dry_run=TRUE, pbs.whisker = "launch/pbs_katana.whisker") {
+launch_task_i_katana <- function(par_set, sleep=0, dry_run=FALSE, pbs.whisker = "launch/pbs_katana.whisker") {
   file <- write_pbs(par_set, pbs.whisker = pbs.whisker)
   res <- qsub(file, dry_run=dry_run, verbose=TRUE, sleep=sleep)
-  #dat <- process_pbs(par_set, res)
-  #append_jobfile(dat, file.path(path, "_jobs.csv"))
+
+  res
 }
 
 write_pbs <- function(par_set, pbs.whisker) {
@@ -18,8 +18,8 @@ write_pbs <- function(par_set, pbs.whisker) {
 
 qsub <- function(pbs_filenames, dry_run=TRUE, verbose=TRUE, sleep=0) {
   if (dry_run) {
-    system2 <- function(command, args, ...) {
-      message(paste(command, args, ...))
+    system2 <- function(command, args, stdout=TRUE) {
+      message(paste(command, args, "(Dry run)"))
     }
   }
   pbs_ids <- vector("list", length=length(pbs_filenames))
@@ -34,26 +34,6 @@ qsub <- function(pbs_filenames, dry_run=TRUE, verbose=TRUE, sleep=0) {
   }
   ## TODO: Throw an error if the job was refused.
   invisible(pbs_ids)
-}
-
-append_jobfile <- function(dat, jobfile="pbs_jobs.csv") {
-  if (file.exists(jobfile)) {
-    prev <- read.csv(jobfile, stringsAsFactors=FALSE)
-    ## *Replace* existing ids.
-    v <- c("id", "pbs_id")
-    hash_prev <- apply(prev[v], 1, paste, collapse="\r")
-    hash_dat <- apply(dat[v], 1, paste, collapse="\r")
-    prev <- prev[!(hash_prev %in% hash_dat),]
-  } else {
-    prev <- NULL
-  }
-  write.csv(rbind(prev, dat), jobfile, row.names=FALSE)
-}
-
-process_pbs <- function(id, pbs) {
-  data.frame(id=id,
-             pbs_id=as.integer(sub("\\..+$", "", pbs)),
-             stringsAsFactors=FALSE)
 }
 
 # Delete jobs from queue
