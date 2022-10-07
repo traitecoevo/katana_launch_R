@@ -1,86 +1,254 @@
+---
+title: "Automating job deployment on katana"
+author: "Daniel Falster"
+date: "2022-10-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval=FALSE)
+```
+
+
+This code sets up a workflow for running  batch of tasks on UNSW's katana HPC
+environment, using for both running and submitting jobs.
+
+# Background
+
+HPC jobs 
+
+- submit using PBS via pbs file (about PBS)
+- link to Katana's documentation
+
+
+Basic structure of PBS file
+
+
+
+# Foundation
+
+The foundation for running your jobs is a minimalist peice of code that can run
+one of your jobs, with a function accepting as arguments all the parameters you're 
+going to want to vary among simulations.
+
+In the code below I use a function `run_my_model` which has 4 arguments, the 
+first 3 being parameters I'm going to vary, the last being a path for the results 
+to be saved.
+
+So let's go ahead and run it:
+
+```{r}
+# load whatever libraries you need  
+library(dplyr)
+
+# Source some code for the precject
+source("R/my_model.R")
+
+trait <- "lma"
+D <- 10
+B <- 1.5
+path <- "output/test.rds"
+
+run_my_model(trait, D, B, path)
+```
+
+
+We should now have output in 
+
+```{r}
+out <- readRDS(path)
+
+out
+```
 
 # Establish grid
 
-Create grid of parameters you want to run
+So, now we have a grid of parameters and want to runa  job for each combination. 
+
+First let's set up the grid: 
 
 ```{r}
 library(tidyverse)
 
-dir.create("output/grid", T, T)
+output_path <- "output"
 
 grid <- 
   expand_grid(
     trait = "lma",
     D = c(0.5,1,2,5,10,15,20,25,30,35,40),
     B = c(0.5,0.75,0.95,0.99,1.01,1.1,1.25,1.51,1.75,2.0,2.25,2.5)
-    ) %>% mutate(
-      name = sprintf("%s_%s_%s", trait, D, B),
-      path = sprintf("output/grid/%s/%s", trait, name),
-      status = "none"
-    )
+  ) %>% 
+  
+  # Make name from all pars glued together
+  unite("name", remove = FALSE) %>%
+  # Add path, status
+  mutate(
+    status = "none",
+    path = sprintf("%s/%s", output_path, name),
+    # Extra details needed on katana
+    wall='AAA',
+    email = "X@X", 
+    project_root= "YYY"  #e.g.   /home/z3239343/mystudy
+  )
 
-grid %>% write_csv("output/grid/lma.csv")
-
+dir.create(output_path, F, T)
+grid %>% write_csv(sprintf("%s/grid.csv", output_path))
 ```
 
+Now have table of parameters to run. The above code also saves the table
+as we'll reuse and update this file
+
+```{r}
+grid
+```
 
 
 # Run simulations
 
+First, we can run simulations locally. You'll want to do this anyway to make sure everytihin is running
+
 ## Single locally (interactive)
 
+As above, you can run a single simulation 
+
 ```{r}
-# Load whatever files you need
+# load whatever libraries you need  
+library(dplyr)
+
+# Source some code for the precject
 source("R/my_model.R")
 
 trait <- "lma"
-
 D <- 10
 B <- 1.5
-path <- "output/tmp"
+path <- "output/test.rds"
 
-my_model(trait, D, B, path)
+run_my_model(trait, D, B, path)
 ```
 
-## Single locally (via terminal)
+## Run many locally with mclappy
 
-```
-./launch/run.R lma 10 1.5
-```
-
-## Many locally (with mclappy)
+As a next step, we can run simulations usinng mcapply
 
 ```{r}
+library(dplyr)
 source("R/my_model.R")
 
+library(parallel)
 
 grid_list <- 
   # load grid
-  read.csv("output/grid/lma.csv", stringsAsFactors = F) %>%
+  read_csv("output/grid.csv", show_col_types = FALSE) %>%
   # filter to items you want to run 
-  filter(D < 10) %>% 
+  #filter(D < 10) %>% 
   # then make into list
   split(., .$name) %>% lapply(as.list)
 
 # execute jobs in parallel
-parallel::mclapply(grid_list, function(x) my_model(x$trait, x$D, x$B, x$path), mc.cores=6)
+tmp <- 
+  parallel::mclapply(grid_list, function(x) run_my_model(x$trait, x$D, x$B, paste0(x$path,".rds")), mc.cores=6)
 
 ```
 
-## Many locall (via terminal in background
+We can see that jobs ran by
+
+```{r}
+paste0(grid$path, ".rds")  %>% file.exists() %>% all()
+```
+
+## Run single locally (via terminal)
+
+If that works, we now take that code and crate a standalone 
+file to run the simulations from a script, which acceptes the 
+arguments of the function as arguments for the script. 
+
+Here's an example from the code above, stored in the file `launch/run.R`"
+
+```{r}
+
+#!/usr/bin/env Rscript
+
+# Runs a single job
+# Requires four arguments: trait, D, B, path
+
+args=commandArgs(TRUE)
+
+# test if there is at least one argument: if not, return an error
+if (length(args) !=4) {
+  stop("Four arguments must be supplied", call.=FALSE)
+} else {
+  trait  = as.character(args[1])
+  D  = as.numeric(args[2])
+  B  = as.numeric(args[3])
+  path = as.character(args[4])
+  }
+
+library(dplyr)
+
+source("R/my_model.R")source("R/plant.R")
+run_my_model(trait, D, B, path)
+```
+
+We can now run this at the terminal using a call like
+```
+./launch/run.R lma 10 1.5 output/tmp.rds
+```
+
+You should now have
+
+
+TIPS: 
+
+- if you're not familiar with running code like this, checkout this guide XXX
+- you may need make the file executable by running
+
+```
+chmod +x ./launch/run.R
+```
+
+## Many locally (via terminal in background
+
+You can use the above to run lots of jobs locally, in the background
+by executing in shell
 
 ```{sh, eval=FALSE}
 # lma
 D=10
 for b in 0.75 0.98 1.05 1.2 1.5 2.0;
  do
-   nohup  ./run.R lma $b $D0 output/lma-$b.txt 2>&1 &
+   nohup  ./launch/run.R lma $b $D output/lma_$b_$D.rds > output/lma-$b.txt 2>&1 &
 done
 ```
 
+Note the extra stuff at the end. `> output/lma-$b.txt 2>&1 &` pipes any output messages into this file
+
 ## Launch in katana, each as separate job 
 
+If you want to run the jobs on katana, we need an extra step to launch the job, 
+which is that we need to submit a job to the queue using a `*.pbs` file. 
+
+In R that means creating the files and then submitting them
+
+
+The code below achieves this using a template pbs file stored in `launch/pbs_katana.whisker`
+
+So the code first create the pbs files then submits them
+
+
 ```{r}
+library(dplyr)
+source("R/my_model.R")
+
+library(parallel)
+
+grid_list <- 
+  # load grid
+  read_csv("output/grid.csv", show_col_types = FALSE) %>%
+  # filter to items you want to run 
+  #filter(D < 10) %>% 
+  # then make into list
+  split(., .$name) %>% lapply(as.list)
+
 source("launch/pbs.R")
 
 # launch one job
@@ -88,50 +256,27 @@ i <- 1
 launch_task_i_katana(grid_list[[i]])
 
 # launch many jobs
-lapply(grid_list, launch_task_i_katana)
+walk(grid_list, launch_task_i_katana)
 ```
 
-# Checking status of HPC jobs
+## Checking status of HPC jobs
 
 Check status
 ```{r}
-check_grid_status("output/grid/lma.csv")
+check_grid_status("output/grid.csv")
 ```
 
 
-# Assessing time use
+# Getting stuff on and off katana
 
-```{r}
+Copy up to katana:
 
-library(stringr)
-library(dplyr)
-
-pbs_path <- "results/pbs/rho_combinations"
-
-files <- dir(pbs_path, pattern = "output*", full.names=TRUE)
-
-read_file<- function(filename) {
-  f <- readLines(filename)
-  s <- f[grepl("Total)", f, fixed=TRUE)] %>% str_trim() %>% str_split(.," ") %>% unlist()
-  s[[1]][1]
-}
-
-times <- tibble(gsub("/Users/dfalster/Downloads/mortality_bci/results/pbs/rho_combinations/output_", "", files) %>% as.numeric(),
-               time =(lapply(files, read_file) %>% na_if("NULL") %>% unlist() %>% as.numeric()) / 60/60)
-
-data <- left_join(
-            remake::make("rho_tasks") %>% as_tibble(),
-            times, by = "jobid") %>%
-      dplyr::select(rho_combo, jobid, kfold, time) %>%
-      mutate(
-            rho_combo = factor(rho_combo, levels = c("none", "a", "b", "c","ab", "ac", "bc", "abc")),
-            kfold = as.character(kfold)
-            )
-
-
-ggplot(data, aes(rho_combo, time)) +
-  geom_boxplot(colour="grey") +
-  geom_point(aes(colour = kfold)) +
-  labs( x = "Model variant (rho combinations)", y = "time per job (hrs)")
+```
+scp -r .  user_id@kdm.restech.unsw.edu.au:/home/user_id/project/
 ```
 
+Retrieve results from katana
+
+```
+scp -r user_id@kdm.restech.unsw.edu.au:/home/user_id/project/output .
+```

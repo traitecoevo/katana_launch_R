@@ -1,29 +1,23 @@
-launch_task_i_katana <- function(...) {
-  launch_task_i(..., pbs.whisker = "launch/pbs_katana.whisker")
+
+launch_task_i_katana <- function(par_set, sleep=0, dry_run=TRUE, pbs.whisker = "launch/pbs_katana.whisker") {
+  file <- write_pbs(par_set, pbs.whisker = pbs.whisker)
+  res <- qsub(file, dry_run=dry_run, verbose=TRUE, sleep=sleep)
+  #dat <- process_pbs(par_set, res)
+  #append_jobfile(dat, file.path(path, "_jobs.csv"))
 }
 
-launch_task_i <- function(i, task_name, pbs.whisker, iter, sleep=0) {
-  files <- lapply(i, write_pbs, pbs.whisker = pbs.whisker, task_name = task_name, iter = iter)
-  res <- sapply(files, qsub, echo_only=FALSE, verbose=TRUE, sleep=sleep)
-  dat <- process_pbs(i, res)
-  append_jobfile(dat, file.path("output/pbs", task_name, "_jobs.csv"))
+write_pbs <- function(par_set, pbs.whisker) {
+  template <- readLines(pbs.whisker)
+  str <- whisker::whisker.render(template, par_set)
+  file <- paste0(par_set$path, ".pbs")
+  dir.create(dirname(file), FALSE, TRUE)
+  writeLines(str, file)
+  file
 }
 
-pbs_filename <- function(i, s){
-  sprintf("output/pbs/%s/job_%d.pbs", s, i)
-}
 
-write_pbs <- function(id, pbs.whisker, task_name, iter = 2000) {
-    template <- readLines(pbs.whisker)
-    str <- whisker::whisker.render(template)
-    file <- pbs_filename(id, task_name)
-    dir.create(dirname(file), FALSE, TRUE)
-    writeLines(str, file)
-    file
-}
-
-qsub <- function(pbs_filenames, echo_only=TRUE, verbose=TRUE, sleep=0) {
-  if (echo_only) {
+qsub <- function(pbs_filenames, dry_run=TRUE, verbose=TRUE, sleep=0) {
+  if (dry_run) {
     system2 <- function(command, args, ...) {
       message(paste(command, args, ...))
     }
@@ -72,22 +66,28 @@ check_status <- function(x) {
   
   status <- rep("none", length(x))
   
+  # Simulation finished if rds file exists
+  files <- paste0(x, ".rds")
+  has_started <- file.exists(files)
+  status[has_started] <- "finished"
+  
+  
   # Simulation started if log file exists
   files <- paste0(x, ".log")
-  has_started <- file.exists(files)
+  has_started <- file.exists(files) & status!="finished"
   status[has_started] <- "started"
   
-  # simulation finished if last line of log file contains signal. Only check files that have started
-  signal <- "Ending log"
-  i <- files[has_started] %>% purrr::map_lgl(~readLines(.x) %>% last() %>% grepl(signal, .))
-  names_finished <- files[has_started][i]
-  status[files %in% names_finished] <- "finished"
+  # # simulation finished if last line of log file contains signal. Only check files that have started
+  # signal <- "Ending log"
+  # i <- files[has_started] %>% purrr::map_lgl(~readLines(.x) %>% last() %>% grepl(signal, .))
+  # names_finished <- files[has_started][i]
+  # status[files %in% names_finished] <- "finished"
   
   status
 }
 
 check_grid_status <- function(file){
-  read.csv(file, stringsAsFactors = F) %>% 
+  read_csv(file, show_col_types = FALSE) %>% 
     mutate(
       status = check_status(path)
     )

@@ -6,18 +6,19 @@
 #PBS -N {{{name}}}
 
 ### Specify notifications
-#PBS -M daniel.falster@unsw.edu.au
+#PBS -M {{email}}
 #PBS -m abe
 
 ## location for output and error files
 #PBS -j oe
-#PBS -o /home/z2209343/Falster-successional_diversity/{{{path}}}
-##PBS -d /home/z2209343/Falster-successional_diversity/
-##PBS -w /home/z2209343/Falster-successional_diversity/
+#PBS -o {{project_root}}/{{{path}}}.txt
+##PBS -d {{project_root}}
+##PBS -w {{project_root}}
 
-cd /home/z2209343/Falster-successional_diversity/
+# move to project directory
+cd {{project_root}}
 
-module add R/4.0.2
+# load R module
+module add R/4.2.0-clean
 
-./launch/run.R {{{trait}}} {{{d}}} {{{B}}} {{{path}}}
-
+./launch/run.R {{{trait}}} {{{D}}} {{{B}}} {{{path}}}.rds
